@@ -103,10 +103,11 @@ _fic_dst_ is target FiCSW ID (int), the value definied in class _SES_ID_.
 _addr_ is target DDR-DRAM address.
 _data_ is bytes-like object.
 
-### _ficses_ddr_read(fic_dst, addr)_
+### _ficses_ddr_read(fic_dst, addr, size)_
 Read data from DDR-DRAM of FiCSW and return as bytes-like object.
 _fic_dst_ is target FiCSW ID (int), the value definied in class _SES_ID_.
 _addr_ is target DDR-DRAM address.
+_size_ is read data size
 
 #### Example
     with FICSES() as m:
@@ -121,7 +122,7 @@ _addr_ is target DDR-DRAM address.
         # --- DDR read test ----
         # m.ficses_apreset(SES_ID.FIC00)
         # m.ficses_apstart(SES_ID.FIC00)
-        b = m.ficses_ddr_read(SES_ID.FIC00, 0x00000000)
+        b = m.ficses_ddr_read(SES_ID.FIC00, 0x00000000, 1024*128)
         with open("ddr_out.bin", "wb") as f:
             f.write(b)
 
@@ -148,7 +149,10 @@ Activates start HLS signal _ap_start_
 ### _FICSES.ficses_apreset(fic_tgt)_
 Activates reset HLS signal _ap_reset_
 
+NOTE: please call this function twice...
+
 #### Example
+    m.ficses_apreset(SES_ID.FIC00)
     m.ficses_apreset(SES_ID.FIC00)
 
 ----

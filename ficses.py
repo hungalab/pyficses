@@ -33,6 +33,7 @@ FICSES_BA1_SIZE          = 4*1024       # BA1 size = 4KB
 FICSES_BA1_OFFT0         = 0x00000008
 
 FICSES_TXRX_BUF_SIZE     = 0x040000     # 256KB
+FICSES_TXRX_PKT_NUM      = int(FICSES_TXRX_BUF_SIZE / FICSES_PKT_SIZE)
 
 FICSES_CH2_TX_BUF_OFFT   = 0x080000
 FICSES_CH2_RX_BUF_OFFT   = 0x0c0000
@@ -92,8 +93,10 @@ class SES_REG(IntEnum):
     REG_PKT0         = 0xfff7,    # (R)  Packet monitor for 0-3
     REG_PKT1         = 0xfff6,    # (R)  Packet monitor for 4-7
     REG_SLOT         = 0x2000,    # (RW) Slot register
+    REG_AP_DONE      = 0xddd0,    # (R)  ap_done
     REG_DDR_WR_START = 0xddd1,    # (W)  ddr_write_start on HLS module
     REG_DDR_RD_START = 0xddd2,    # (W)  ddr_read_start on HLS module
+    REG_HLS_OUT_VALID= 0xddd3,    # (R)  hls axi out valid
     REG_DDR_ADDR     = 0xddda,    # (RW) ddr address
 #----------------------------------------------------------
 
@@ -252,6 +255,7 @@ class FICSES:
         pkt = self._ficses_pack_pkt(SES_CMD.CMD_WRITE,
                                     fic_tgt, SES_ID.HOST, r_addr, data)
 
+        self._ficses_wipe_ctrltxbuf()
         self.ba_data.seek(FICSES_CH1_TX_BUF_OFFT, os.SEEK_SET)     # Always ch1 for ctrl send
         self.ba_data.write(pkt)
 
@@ -262,12 +266,15 @@ class FICSES:
             self.ba_data.write(pkt)
 
         self._ficses_ctrl_reg(FICSES_CH1_TX_START, busy_wait=True)    # Kick ctrl reg
-        self._ficses_reopen()   # instead of flush()
+        #self._ficses_reopen()   # instead of flush()
 
     #----------------------------------------------------------
     def ficses_reg_read(self, fic_tgt, r_addr):
         pkt = self._ficses_pack_pkt(SES_CMD.CMD_READ,
                                     fic_tgt, SES_ID.HOST, r_addr, b'\x00')
+
+        self._ficses_wipe_ctrltxbuf()
+        self._ficses_wipe_ctrlrxbuf()
 
         self.ba_data.seek(FICSES_CH1_TX_BUF_OFFT, os.SEEK_SET)     # Always ch1 for ctrl send
         self.ba_data.write(pkt)
@@ -279,37 +286,78 @@ class FICSES:
         self.ba_data.seek(FICSES_CH1_RX_BUF_OFFT, os.SEEK_SET)
         rx_buf = self.ba_data.read(FICSES_PKT_VAL_SIZE)
 
-        self._ficses_reopen()   # instead of flush()
+        #self._ficses_reopen()   # instead of flush()
 
         return self._ficses_strip_pkt(rx_buf)
 
     #----------------------------------------------------------
-    def ficses_ddr_write(self, fic_dst, addr, data):
-        self.ficses_reg_write(fic_dst, SES_REG.REG_DDR_ADDR, addr.to_bytes(16, 'little'))   # Set DDR addr
-        self.ficses_reg_write(fic_dst, SES_REG.REG_DDR_WR_START, b'\x01')  # Set write
-        self._ficses_data_send_128k(fic_dst, data)
-        self._ficses_reopen()   # instead of flush()
+    def _ficses_wipe_ctrltxbuf(self):
+        self.ba_data.seek(FICSES_CH1_TX_BUF_OFFT, os.SEEK_SET)     # Always ch1 for ctrl
+        zero = b'\x00' * FICSES_PKT_SIZE
+        for _ in range(FICSES_TXRX_PKT_NUM):
+                self.ba_data.write(zero)
+        #self._ficses_reopen()   # instead of flush()
+
+    def _ficses_wipe_ctrlrxbuf(self):
+        self.ba_data.seek(FICSES_CH1_RX_BUF_OFFT, os.SEEK_SET)     # Always ch1 for ctrl
+        zero = b'\x00' * FICSES_PKT_SIZE
+        for _ in range(FICSES_TXRX_PKT_NUM):
+            self.ba_data.write(zero)
+        #self._ficses_reopen()   # instead of flush()
+
+    def _ficses_wipe_datarxbuf(self):
+        self.ba_data.seek(FICSES_CH2_RX_BUF_OFFT, os.SEEK_SET)     # Always ch2 for data
+        zero = b'\x00' * FICSES_PKT_SIZE
+        for _ in range(FICSES_TXRX_PKT_NUM):
+                self.ba_data.write(zero)
+        #self._ficses_reopen()   # instead of flush()
+
+    def _ficses_wipe_datatxbuf(self):
+        self.ba_data.seek(FICSES_CH2_TX_BUF_OFFT, os.SEEK_SET)     # Always ch2 for data
+        zero = b'\x00' * FICSES_PKT_SIZE
+        for _ in range(FICSES_TXRX_PKT_NUM):
+                self.ba_data.write(zero)
+        #self._ficses_reopen()   # instead of flush()
 
     #----------------------------------------------------------
-    def ficses_ddr_read(self, fic_dst, addr):
+    def ficses_ddr_write(self, fic_dst, addr, data):
+        self.ficses_reg_write(fic_dst, SES_REG.REG_DDR_ADDR, addr.to_bytes(16, 'little'))   # Set DDR addr
+        #self.ficses_reg_write(fic_dst, SES_REG.REG_DDR_ADDR, addr.to_bytes(16, 'little'))   # FIXME: I dont know why i need call twice???
+
+        self.ficses_reg_write(fic_dst, SES_REG.REG_DDR_WR_START, b'\x01')  # Set write
+        self._ficses_data_send_128k(fic_dst, data)
+        #self._ficses_reopen()   # instead of flush()
+
+    #----------------------------------------------------------
+    def ficses_ddr_read(self, fic_dst, addr, size):
         # Set DDR address register
         self.ficses_reg_write(fic_dst, SES_REG.REG_DDR_ADDR, addr.to_bytes(16, 'little'))
+        #self.ficses_reg_write(fic_dst, SES_REG.REG_DDR_ADDR, addr.to_bytes(16, 'little'))   # FIXME: I dont know why i need call twice???
+
+        self._ficses_wipe_datarxbuf()   # Wipe Ch2 RX buffer
         self._ficses_ctrl_reg(FICSES_CH2_RX_START)    # Kick ctrl reg
-        self.ficses_reg_write(fic_dst, SES_REG.REG_DDR_RD_START, b'\x01')  # Transfer start
-        b = self._ficses_data_receive_128k()
-        self._ficses_reopen()   # instead of flush()
+
+        n_read = int(size / FICSES_PKT_EFF_PLD_SIZE)
+        n_read += 1 if (size % FICSES_PKT_EFF_PLD_SIZE) > 0 else 0
+        b = bytearray(0)
+        for _ in range(n_read):
+            self.ficses_reg_write(fic_dst, SES_REG.REG_DDR_RD_START, b'\x01')  # Transfer start
+            b += self._ficses_data_receive_128k()
+
+        #self._ficses_reopen()   # instead of flush()
         return b
 
     #----------------------------------------------------------
     def ficses_send(self, fic_dst, data):
         self._ficses_data_send_128k(fic_dst, data)
-        self._ficses_reopen()   # instead of flush()
+        #self._ficses_reopen()   # instead of flush()
 
     #----------------------------------------------------------
     def ficses_receive(self, fic_dst):
+        self._ficses_wipe_datarxbuf()   # Wipe Ch2 RX buffer
         self._ficses_ctrl_reg(FICSES_CH2_RX_START)    # Kick ctrl reg
         b = self._ficses_data_receive_128k()
-        self._ficses_reopen()   # instead of flush()
+        #self._ficses_reopen()   # instead of flush()
         return b
   
     #----------------------------------------------------------
@@ -352,7 +400,8 @@ class FICSES:
                 data_left -= FICSES_PKT_EFF_PLD_SIZE 
                 data_xfer += FICSES_PKT_EFF_PLD_SIZE
 
-            self.ba_data.seek(FICSES_CH2_TX_BUF_OFFT, os.SEEK_SET)   # Always ch1 for data send
+            self._ficses_wipe_datatxbuf()   # Wipe data TX buffer
+            self.ba_data.seek(FICSES_CH2_TX_BUF_OFFT, os.SEEK_SET)   # Always ch2 for data send
 
             for i in range(0, FICSES_PKT_EFF_PLD_SIZE, FICSES_PKT_PLD_SIZE):
                 # ---- Write to FICSES TX buffer
@@ -373,6 +422,7 @@ class FICSES:
     def ficses_apstart(self, fic_tgt):
         pkt = self._ficses_pack_pkt(SES_CMD.CMD_APSTART, 
                                     fic_tgt, 0, 0, b'\x01')
+        self._ficses_wipe_ctrltxbuf()
         self.ba_data.seek(FICSES_CH1_TX_BUF_OFFT, os.SEEK_SET)     # Always use ch1 for ctrl packet
         self.ba_data.write(pkt)
         self._ficses_ctrl_reg(FICSES_CH1_TX_START)    # Kick ctrl reg
@@ -380,6 +430,7 @@ class FICSES:
     def ficses_apreset(self, fic_tgt):
         pkt = self._ficses_pack_pkt(SES_CMD.CMD_APRESET, 
                                     fic_tgt, 0, 0, b'\x01')
+        self._ficses_wipe_ctrltxbuf()
         self.ba_data.seek(FICSES_CH1_TX_BUF_OFFT, os.SEEK_SET)     # Always use ch1 for ctrl pakcet
         self.ba_data.write(pkt)
         self._ficses_ctrl_reg(FICSES_CH1_TX_START)    # Kick ctrl reg
@@ -391,30 +442,36 @@ class FICSES:
 
 #----------------------------------------------------------
 if __name__ == '__main__':
-    #with FICSES() as m:
-    #    # ---- reg read/write test ----
-    #    m.ficses_reg_write(SES_ID.FIC00, 0xffff, b'\xde')
-    #    b = m.ficses_reg_read(SES_ID.FIC00, 0xffff)
-    #    print(b)
+    with FICSES() as m:
+        # ---- reg read/write test ----
+        m.ficses_reg_write(SES_ID.FIC00, 0xffff, b'\xab')
+        b = m.ficses_reg_read(SES_ID.FIC00, 0xffff)
+        print(b)
 
     with FICSES() as m:
-        # --- DDR write test ----
         m.ficses_apreset(SES_ID.FIC00)
+        m.ficses_apreset(SES_ID.FIC00)  # FIXME: I dont know why call it twice???
         m.ficses_apstart(SES_ID.FIC00)
-
-        with open("test128k", "rb") as f:
+        
+        # --- DDR write test ----
+        print('TEST: ficses_ddr_write')
+        #with open("test128k", "rb") as f:
+        #with open("test1024k", "rb") as f:
+        with open("test10M", "rb") as f:
+        #with open("zero10M", "rb") as f:
             buf = f.read()
             m.ficses_ddr_write(SES_ID.FIC00, 0x00000000, buf)
 
-        #m.ficses_ddr_write(SES_ID.FIC00, 0x00000000, b'\xcc\xdd\xaa\xaa\xbb\xbb\xbb\xbb')
-        #m.ficses_ddr_write(SES_ID.FIC00, 0x00000000, b'\xff\xff\xff\xff\xff\xff\xff\xff')
+            #m.ficses_ddr_write(SES_ID.FIC00, 0x00000000, b'\xcc\xdd\xaa\xaa\xbb\xbb\xbb\xbb')
+            #m.ficses_ddr_write(SES_ID.FIC00, 0x00000000, b'\xff\xff\xff\xff\xff\xff\xff\xff')
 
-        # --- DDR read test ----
-        #m.ficses_apreset(SES_ID.FIC00)
-        #m.ficses_apstart(SES_ID.FIC00)
-        b = m.ficses_ddr_read(SES_ID.FIC00, 0x00000000)
-        with open("ddr_out.bin", "wb") as f:
-            f.write(b)
+            # --- DDR read test ----
+            print('TEST: ficses_ddr_read')
+            #m.ficses_apreset(SES_ID.FIC00)
+            #m.ficses_apstart(SES_ID.FIC00)
+            b = m.ficses_ddr_read(SES_ID.FIC00, 0x00000000, len(buf))
+            with open("ddr_out.bin", "wb") as f:
+                f.write(b)
 
     #print(len(b))
     #print(b)
