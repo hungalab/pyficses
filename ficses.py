@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.6
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 #-------------------------------------------------------------------------------
@@ -334,13 +334,12 @@ class FICSES:
         self.ficses_reg_write(fic_dst, SES_REG.REG_DDR_ADDR, addr.to_bytes(16, 'little'))
         #self.ficses_reg_write(fic_dst, SES_REG.REG_DDR_ADDR, addr.to_bytes(16, 'little'))   # FIXME: I dont know why i need call twice???
 
-        self._ficses_wipe_datarxbuf()   # Wipe Ch2 RX buffer
-        self._ficses_ctrl_reg(FICSES_CH2_RX_START)    # Kick ctrl reg
-
         n_read = int(size / FICSES_PKT_EFF_PLD_SIZE)
         n_read += 1 if (size % FICSES_PKT_EFF_PLD_SIZE) > 0 else 0
         b = bytearray(0)
         for _ in range(n_read):
+            self._ficses_wipe_datarxbuf()   # Wipe Ch2 RX buffer
+            self._ficses_ctrl_reg(FICSES_CH2_RX_START)    # Kick ctrl reg
             self.ficses_reg_write(fic_dst, SES_REG.REG_DDR_RD_START, b'\x01')  # Transfer start
             b += self._ficses_data_receive_128k()
 
@@ -456,6 +455,7 @@ if __name__ == '__main__':
         # --- DDR write test ----
         print('TEST: ficses_ddr_write')
         #with open("test128k", "rb") as f:
+        #with open("test256k", "rb") as f:
         #with open("test1024k", "rb") as f:
         with open("test10M", "rb") as f:
         #with open("zero10M", "rb") as f:
