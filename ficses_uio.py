@@ -2,11 +2,11 @@
 # -*- coding: utf-8 -*-
 
 #-------------------------------------------------------------------------------
-# FiCSES python library
-# by nyacom (C) 2019.09
+# FiCSES python library (Usespace IO driver)
+# by nyacom (C) 2019.11
 #-------------------------------------------------------------------------------
 
-import os, sys
+import os, sys, resource
 import mmap
 import struct
 import time
@@ -16,21 +16,19 @@ import re
 from enum import Enum, IntEnum
 
 #----------------------------------------------------------
-FICSES_MEM_DEV           = u'/dev/mem'
-
-FICSES_PCI_VENID         = '10ee'       # FICSES PCI Vendor ID (Xilinx)
-FICSES_PCI_DEVID         = '8028'       # FICSES PCI Device ID
+FICSES_UIO               = u'uio0'
+FICSES_MEM_DEV           = u'/dev/' + FICSES_UIO
 
 FICSES_PKT_SIZE          = 32           # FICSES packet size (32B = 256bit)
 FICSES_PKT_VAL_SIZE      = 22           # FICSES packet value size (exclude padding)
 FICSES_PKT_PLD_SIZE      = 16           # FICSES packet payload size (value size)
 FICSES_PKT_EFF_PLD_SIZE  = 0x020000     # FICSES packet effective payload size (256KB / 2)
 
-#FICSES_BA0_ADDR          = 0xf6c0000   # The base address is depends...
-#FICSES_BA1_ADDR          = 0xf700000   # The base address is depends...
 FICSES_BA0_SIZE          = 4*1024*1024  # BA0 size = 4MB
 FICSES_BA1_SIZE          = 4*1024       # BA1 size = 4KB
 FICSES_BA1_OFFT0         = 0x00000008
+FICSES_BA0_ADDR          = 0x00000000   
+FICSES_BA1_ADDR          = FICSES_BA0_ADDR + FICSES_BA0_SIZE
 
 FICSES_TXRX_BUF_SIZE     = 0x040000     # 256KB
 FICSES_TXRX_PKT_NUM      = int(FICSES_TXRX_BUF_SIZE / FICSES_PKT_SIZE)
@@ -107,11 +105,6 @@ class FICSES:
         self.ba_data = None
         self.ba_ctrl = None
 
-        # Get PCI device ID
-        base_addr = self._get_pci_baseaddr(FICSES_PCI_VENID, FICSES_PCI_DEVID)
-        self.FICSES_BA0_ADDR = int(base_addr[0], 16)
-        self.FICSES_BA1_ADDR = int(base_addr[1], 16)
-
     def __enter__(self):
         self._ficses_open()
         return self
@@ -120,33 +113,14 @@ class FICSES:
         self._ficses_close()
 
     #----------------------------------------------------------
-    # Get PCI ID
-    #----------------------------------------------------------
-    def _get_pci_baseaddr(self, ven_id, dev_id):
-        lspci_cmd = 'lspci -d {0}:{1} -v'.format(ven_id, dev_id)
-        lspci_run = subprocess.run(lspci_cmd, stdout=subprocess.PIPE, shell=True)
-        lspci_out = lspci_run.stdout.decode('utf-8')
-
-        addr = []
-        for l in lspci_out.split(u'\n'):
-            m = re.search(r'Memory at ([a-f0-9]{8})', l)
-            if m:
-                addr.append(m.group(1))
-        
-        if addr == []:
-            raise Exception("ERROR: Can not find ficses device!")
-
-        return addr
-
-    #----------------------------------------------------------
-    def _ficses_mmap(self, fd, ba_addr, ba_size):
+    def _ficses_mmap(self, fd, ba, ba_size):
         try:
-            ba_offset = ba_addr % mmap.ALLOCATIONGRANULARITY
             m = mmap.mmap(fd, 
-                        length=ba_size+ba_offset,
+                        length=ba_size,
                         flags=mmap.MAP_SHARED,
                         prot=mmap.PROT_READ|mmap.PROT_WRITE,
-                        offset=ba_addr-ba_offset)
+                        offset=ba*resource.getpagesize())
+
             return m
 
         except Exception:
@@ -163,8 +137,8 @@ class FICSES:
     def _ficses_open(self):
         try:
             self.fd = os.open(FICSES_MEM_DEV, os.O_RDWR)
-            self.ba_data = self._ficses_mmap(self.fd, self.FICSES_BA0_ADDR, FICSES_BA0_SIZE)
-            self.ba_ctrl = self._ficses_mmap(self.fd, self.FICSES_BA1_ADDR, FICSES_BA1_SIZE)
+            self.ba_data = self._ficses_mmap(self.fd, 0, FICSES_BA0_SIZE)
+            self.ba_ctrl = self._ficses_mmap(self.fd, 1, FICSES_BA1_SIZE)
 
         except Exception:
             raise IOError(u'ERROR: Device open failed')

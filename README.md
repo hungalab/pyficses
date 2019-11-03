@@ -17,7 +17,9 @@ It is a ficses library to access FiCSW boards through FiCSES:
 
 * The library is working and tested in Python3.6 later, with Python3.5 may not work due to unexpected behavior in mmap module.
 
-* _root_ priviledge is required.
+* _root_ priviledge is required in non UIO version. 
+  - I recommend to use UIO version (pyficses_uio.py). 
+  - Please check [ficses_uio repository](https://github.com/hungalab/ficses_uio) in github.
 
 ----
 
@@ -157,5 +159,15 @@ NOTE: please call this function twice...
 
 ----
 
-### FAQ
-Anything?
+## Testing pyficses
+
+In ficses_py, there are including basic test routine for FiCSES.
+
+### TEST 1
+Read out from FiCSES register in 0x0C BA1. The read value should '0x12345678'
+
+### TEST 2
+Read out 0xffff register value from FIC00 via FiCSES. To do this test, you should configure FiC00 FPGA before test.
+
+### TEST3
+Read and write DDR memory on FIC00 via FiCSES. To do this test, you should configure FiC00 FPGA before test. (You need prepare test file to do this test. (e.g. test10M))
