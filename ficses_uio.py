@@ -415,20 +415,26 @@ class FICSES:
 
 #----------------------------------------------------------
 if __name__ == '__main__':
-    print('TEST 1: Read out FiCSES 0x0c register in BA1')
+    print('TEST 1: Read out FiCSES register (0x0c) in BA1')
     with FICSES() as m:
         m.ba_ctrl.seek(0x0c, os.SEEK_SET)
         v = int.from_bytes(m.ba_ctrl.read(4), 'little')
         print(hex(v))
 
-    print('TEST 2: Read out FiC00 register via FiCSES')
+    print('TEST 2: Read out FiCSES Lane status (0x10) in BA1')
+    with FICSES() as m:
+        m.ba_ctrl.seek(0x10, os.SEEK_SET)
+        v = int.from_bytes(m.ba_ctrl.read(1), 'little')
+        print("8'b{0:08b}".format(v))
+
+    print('TEST 3: Read out FiC00 register via FiCSES')
     with FICSES() as m:
         # ---- reg read/write test ----
         m.ficses_reg_write(SES_ID.FIC00, 0xffff, b'\xab')
         b = m.ficses_reg_read(SES_ID.FIC00, 0xffff)
         print(b)
 
-    print('TEST 3: FiC00 DDR Read Write test via FiCSES')
+    print('TEST 4: FiC00 DDR Read Write test via FiCSES')
     with FICSES() as m:
         m.ficses_apreset(SES_ID.FIC00)
         m.ficses_apreset(SES_ID.FIC00)  # FIXME: I dont know why call it twice???
